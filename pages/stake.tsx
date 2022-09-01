@@ -1,116 +1,128 @@
-import {
-  ThirdwebNftMedia,
-  useAddress,
-  useMetamask,
-  useNFTDrop,
-  useToken,
-  useTokenBalance,
-  useOwnedNFTs,
-  useContract,
-} from "@thirdweb-dev/react";
-import { BigNumber, ethers } from "ethers";
+import { useAddress, useMetamask } from "@thirdweb-dev/react";
+import { ethers } from "ethers";
 import type { NextPage } from "next";
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import styles from "../styles/Home.module.css";
-
-const nftDropContractAddress = "0x322067594DBCE69A9a9711BC393440aA5e3Aaca1";
-const tokenContractAddress = "0xb1cF059e6847e4270920a02e969CA2E016AeA22B";
-const stakingContractAddress = "0xB712975e13427ac804177E7CebF08781bbF9B89c";
+import usdcVaultJSON from "../src/utils/USDCVaultLogic.json";
+import ERC20JSON from "../src/utils/ERC20.json";
+import { Web3Provider } from "@ethersproject/providers";
 
 const Stake: NextPage = () => {
+  // Ethers
+  const [provider, setProvider] = useState<Web3Provider>();
+  const signer = provider?.getSigner();
+  const [tokenBalance, setTokenBalance] = useState({
+    symbol: "",
+    tvl: 0,
+    multisig: 0,
+    displayValue: 0,
+  });
+
   // Wallet Connection Hooks
   const address = useAddress();
   const connectWithMetamask = useMetamask();
-
+  const decimal = 6;
   // Contract Hooks
-  const nftDropContract = useNFTDrop(nftDropContractAddress);
-  const tokenContract = useToken(tokenContractAddress);
-
-  const { contract, isLoading } = useContract(stakingContractAddress);
-
-  // Load Unstaked NFTs
-  const { data: ownedNfts } = useOwnedNFTs(nftDropContract, address);
-
-  // Load Balance of Token
-  const { data: tokenBalance } = useTokenBalance(tokenContract, address);
-
+  const PROXY = new ethers.Contract(
+    process.env.NEXT_PUBLIC_PROXY_ADDRESS!,
+    usdcVaultJSON.abi,
+    signer
+  );
+  const ERC20 = new ethers.Contract(
+    process.env.NEXT_PUBLIC_USDC_ADDRESS!,
+    ERC20JSON.abi,
+    signer
+  );
   ///////////////////////////////////////////////////////////////////////////
   // Custom contract functions
   ///////////////////////////////////////////////////////////////////////////
-  const [stakedNfts, setStakedNfts] = useState<any[]>([]);
-  const [claimableRewards, setClaimableRewards] = useState<BigNumber>();
+  const [claimableRewards, setClaimableRewards] = useState<Number>();
+  const [claimableTime, setclaimableTime] = useState<Date>();
+  const [deposit, setDeposit] = useState(0);
+  useEffect(
+    () => setProvider(new Web3Provider(window.ethereum as any)),
+    [address]
+  );
 
   useEffect(() => {
-    if (!contract) return;
+    if (!address) return;
+    async function loadExpireTime() {
+      const expireTime = await PROXY?.timelock(1);
+      setclaimableTime(new Date(expireTime.toNumber() * 1000));
+    }
 
-    async function loadStakedNfts() {
-      const stakedTokens = await contract?.call("getStakedTokens", address);
+    loadExpireTime();
+  }, [address]);
 
-      // For each staked token, fetch it from the sdk
-      const stakedNfts = await Promise.all(
-        stakedTokens?.map(
-          async (stakedToken: { staker: string; tokenId: BigNumber }) => {
-            const nft = await nftDropContract?.get(stakedToken.tokenId);
-            return nft;
-          }
-        )
+  useEffect(() => {
+    if (!address) return;
+    console.log(address);
+    async function loadERC20() {
+      const symbol = await ERC20?.symbol();
+      const displayValue = await ERC20?.balanceOf(address);
+      const multisig = await ERC20?.balanceOf(
+        process.env.NEXT_PUBLIC_MULTISIG_ADDRESS
       );
-
-      setStakedNfts(stakedNfts);
-      console.log("setStakedNfts", stakedNfts);
+      const tvl = await PROXY?.balanceOf();
+      setTokenBalance({
+        symbol: symbol,
+        tvl: tvl.div(1e6).toNumber(),
+        multisig: multisig.div(1e6).toNumber(),
+        displayValue: displayValue.div(1e6).toNumber(),
+      });
     }
-
-    if (address) {
-      loadStakedNfts();
-    }
-  }, [address, contract, nftDropContract]);
-
-  useEffect(() => {
-    if (!contract || !address) return;
 
     async function loadClaimableRewards() {
-      const cr = await contract?.call("availableRewards", address);
-      console.log("Loaded claimable rewards", cr);
-      setClaimableRewards(cr);
+      const cr = await PROXY?.claimableOf(address);
+      console.log("Loaded claimable rewards", cr.toNumber() / 1e6);
+      setClaimableRewards(cr.toNumber() / 1e6);
     }
 
+    loadERC20();
     loadClaimableRewards();
-  }, [address, contract]);
+  }, [address, deposit, claimableRewards]);
 
   ///////////////////////////////////////////////////////////////////////////
   // Write Functions
   ///////////////////////////////////////////////////////////////////////////
-  async function stakeNft(id: BigNumber) {
+  async function stake() {
     if (!address) return;
-
-    const isApproved = await nftDropContract?.isApproved(
-      address,
-      stakingContractAddress
-    );
+    const allowance = await ERC20?.allowance(address, PROXY?.address);
     // If not approved, request approval
-    if (!isApproved) {
-      await nftDropContract?.setApprovalForAll(stakingContractAddress, true);
+    if (allowance.toString() === "0") {
+      const approve = await ERC20?.approve(
+        PROXY?.address,
+        ethers.constants.MaxUint256.toString()
+      );
+      await approve.wait();
     }
-    const stake = await contract?.call("stake", id);
+    const tx = await PROXY?.stake(
+      ethers.utils.parseUnits(deposit.toString(), decimal)
+    );
+    await tx.wait();
+    setDeposit(0);
   }
 
-  async function withdraw(id: BigNumber) {
-    const withdraw = await contract?.call("withdraw", id);
+  async function withdraw() {
+    const withdraw = await PROXY?.withdraw();
+    const multisig = await ERC20?.balanceOf(
+      process.env.NEXT_PUBLIC_MULTISIG_ADDRESS
+    );
+    await withdraw.wait();
+    setTokenBalance((prevState) => {
+      return { ...prevState, multisig: multisig.div(1e6).toNumber() };
+    });
   }
 
   async function claimRewards() {
-    const claim = await contract?.call("claimRewards");
-  }
-
-  if (isLoading) {
-    return <div>Loading</div>;
+    const claim = await PROXY?.claim();
+    await claim.wait();
+    setClaimableRewards(0);
   }
 
   return (
     <div className={styles.container}>
-      <h1 className={styles.h1}>Stake Your NFTs</h1>
-
-      <hr className={`${styles.divider} ${styles.spacerTop}`} />
+      <h1 className={styles.h1}>InVar USDC Vault</h1>
 
       {!address ? (
         <button className={styles.mainButton} onClick={connectWithMetamask}>
@@ -118,77 +130,80 @@ const Stake: NextPage = () => {
         </button>
       ) : (
         <>
-          <h2>Your Tokens</h2>
-
           <div className={styles.tokenGrid}>
             <div className={styles.tokenItem}>
-              <h3 className={styles.tokenLabel}>Claimable Rewards</h3>
+              <h3 className={styles.tokenLabel}>TVL</h3>
               <p className={styles.tokenValue}>
-                <b>
-                  {!claimableRewards
-                    ? "Loading..."
-                    : ethers.utils.formatUnits(claimableRewards, 18)}
-                </b>{" "}
-                {tokenBalance?.symbol}
+                <b>{tokenBalance?.tvl}</b> {tokenBalance?.symbol}
               </p>
             </div>
             <div className={styles.tokenItem}>
-              <h3 className={styles.tokenLabel}>Current Balance</h3>
+              <h3 className={styles.tokenLabel}>MultiSig</h3>
               <p className={styles.tokenValue}>
-                <b>{tokenBalance?.displayValue}</b> {tokenBalance?.symbol}
+                <b>{tokenBalance?.multisig}</b> {tokenBalance?.symbol}
               </p>
             </div>
           </div>
 
           <button
             className={`${styles.mainButton} ${styles.spacerTop}`}
-            onClick={() => claimRewards()}
+            onClick={() => withdraw()}
           >
-            Claim Rewards
+            Withdraw to Multisig
           </button>
 
           <hr className={`${styles.divider} ${styles.spacerTop}`} />
 
-          <h2>Your Staked NFTs</h2>
-          <div className={styles.nftBoxGrid}>
-            {stakedNfts?.map((nft) => (
-              <div className={styles.nftBox} key={nft.metadata.id.toString()}>
-                <ThirdwebNftMedia
-                  metadata={nft.metadata}
-                  className={styles.nftMedia}
-                />
-                <h3>{nft.metadata.name}</h3>
-                <button
-                  className={`${styles.mainButton} ${styles.spacerBottom}`}
-                  onClick={() => withdraw(nft.metadata.id)}
-                >
-                  Withdraw
-                </button>
-              </div>
-            ))}
-          </div>
+          <h2>Your Tokens</h2>
+          <div className={styles.tokenGrid}>
+            <div className={styles.tokenOverview}>
+              <h3 className={styles.tokenLabel}>Claimable Time</h3>
+              <p className={styles.tokenValue}>
+                <b>
+                  {!claimableTime ? "Loading..." : claimableTime.toString()}
+                </b>{" "}
+              </p>
+              <h3 className={styles.tokenLabel}>Claimable Rewards</h3>
+              <p className={styles.tokenValue}>
+                <b>{!claimableRewards ? 0 : claimableRewards}</b>{" "}
+                {tokenBalance?.symbol}
+              </p>
+              <button
+                className={`${styles.mainButton}`}
+                onClick={() => claimRewards()}
+              >
+                Claim
+              </button>
+            </div>
+            <div className={styles.tokenOverview}>
+              <h3 className={styles.tokenLabel}>Current Balance</h3>
+              <p className={styles.tokenValue}>
+                <b>{tokenBalance?.displayValue}</b> {tokenBalance?.symbol}
+              </p>
+              <hr className={`${styles.divider}`} />
 
+              <h3 className={styles.tokenLabel}>Staking Amount</h3>
+              <p className={styles.tokenValue}>
+                <b>
+                  <input
+                    className={styles.textInput}
+                    value={deposit}
+                    onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+                      setDeposit(Number(event.target.value))
+                    }
+                  />
+                </b>{" "}
+                {tokenBalance?.symbol}
+              </p>
+              <button
+                className={`${styles.mainButton}`}
+                onClick={() => stake()}
+              >
+                Stake
+              </button>
+            </div>
+          </div>
           <hr className={`${styles.divider} ${styles.spacerTop}`} />
-
-          <h2>Your Unstaked NFTs</h2>
-
-          <div className={styles.nftBoxGrid}>
-            {ownedNfts?.map((nft) => (
-              <div className={styles.nftBox} key={nft.metadata.id.toString()}>
-                <ThirdwebNftMedia
-                  metadata={nft.metadata}
-                  className={styles.nftMedia}
-                />
-                <h3>{nft.metadata.name}</h3>
-                <button
-                  className={`${styles.mainButton} ${styles.spacerBottom}`}
-                  onClick={() => stakeNft(nft.metadata.id)}
-                >
-                  Stake
-                </button>
-              </div>
-            ))}
-          </div>
         </>
       )}
     </div>

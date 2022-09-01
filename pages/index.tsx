@@ -8,7 +8,7 @@ const Home: NextPage = () => {
   return (
     <div className={styles.container}>
       {/* Top Section */}
-      <h1 className={styles.h1}>thirdweb Deploy - Custom Staking Contract</h1>
+      <h1 className={styles.h1}>InVar Test Website</h1>
       <div className={styles.nftBoxGrid}>
         <div
           className={styles.optionSelectBox}
@@ -28,12 +28,12 @@ const Home: NextPage = () => {
           role="button"
           onClick={() => router.push(`/stake`)}
         >
-          {/* Staking an NFT */}
+          {/* Staking */}
           <img src={`/icons/token.webp`} alt="drop" />
-          <h2 className={styles.selectBoxTitle}>Stake Your NFTs</h2>
+          <h2 className={styles.selectBoxTitle}>Stake Your USDC</h2>
           <p className={styles.selectBoxDescription}>
-            Use the custom staking contract deployed via <b>thirdweb Deploy</b>{" "}
-            to stake your NFTs, and earn tokens from the <b>Token</b> contract.
+            Use the custom staking contract{" "}
+            to stake your USDC, and earn tokens from the <b>Token</b> contract.
           </p>
         </div>
       </div>

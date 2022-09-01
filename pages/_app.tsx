@@ -3,11 +3,21 @@ import { ChainId, ThirdwebProvider } from "@thirdweb-dev/react";
 import "../styles/globals.css";
 
 // This is the chainId your dApp will work on.
-const activeChainId = ChainId.Mumbai;
+const activeChainId = ChainId.Goerli;
 
 function MyApp({ Component, pageProps }: AppProps) {
   return (
-    <ThirdwebProvider desiredChainId={activeChainId}>
+    <ThirdwebProvider
+      desiredChainId={activeChainId}
+      // local test use
+      // chainRpc={{ [ChainId.Hardhat]: "http://localhost:8545" }}
+      // sdkOptions={{
+      //   readonlySettings: {
+      //     chainId: ChainId.Hardhat,
+      //     rpcUrl: "http://localhost:8545",
+      //   },
+      // }}
+    >
       <Component {...pageProps} />
     </ThirdwebProvider>
   );
