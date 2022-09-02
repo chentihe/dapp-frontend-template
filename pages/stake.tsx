@@ -8,6 +8,7 @@ import ERC20JSON from "../src/utils/ERC20.json";
 import { Web3Provider } from "@ethersproject/providers";
 
 const Stake: NextPage = () => {
+  const [error, setError] = useState("");
   // Ethers
   const [provider, setProvider] = useState<Web3Provider>();
   const signer = provider?.getSigner();
@@ -46,6 +47,7 @@ const Stake: NextPage = () => {
 
   useEffect(() => {
     if (!address) return;
+
     async function loadExpireTime() {
       const expireTime = await PROXY?.timelock(1);
       setclaimableTime(new Date(expireTime.toNumber() * 1000));
@@ -56,7 +58,7 @@ const Stake: NextPage = () => {
 
   useEffect(() => {
     if (!address) return;
-    console.log(address);
+
     async function loadERC20() {
       const symbol = await ERC20?.symbol();
       const displayValue = await ERC20?.balanceOf(address);
@@ -74,7 +76,6 @@ const Stake: NextPage = () => {
 
     async function loadClaimableRewards() {
       const cr = await PROXY?.claimableOf(address);
-      console.log("Loaded claimable rewards", cr.toNumber() / 1e6);
       setClaimableRewards(cr.toNumber() / 1e6);
     }
 
@@ -96,34 +97,46 @@ const Stake: NextPage = () => {
       );
       await approve.wait();
     }
-    const tx = await PROXY?.stake(
-      ethers.utils.parseUnits(deposit.toString(), decimal)
-    );
-    await tx.wait();
-    setDeposit(0);
+    try {
+      const tx = await PROXY?.stake(
+        ethers.utils.parseUnits(deposit.toString(), decimal)
+      );
+      await tx.wait();
+      setDeposit(0);
+    } catch (error) {
+      setError("Stake is unavailable");
+    }
   }
 
   async function withdraw() {
-    const withdraw = await PROXY?.withdraw();
-    const multisig = await ERC20?.balanceOf(
-      process.env.NEXT_PUBLIC_MULTISIG_ADDRESS
-    );
-    await withdraw.wait();
-    setTokenBalance((prevState) => {
-      return { ...prevState, multisig: multisig.div(1e6).toNumber() };
-    });
+    try {
+      const withdraw = await PROXY?.withdraw();
+      await withdraw.wait();
+      const multisig = await ERC20?.balanceOf(
+        process.env.NEXT_PUBLIC_MULTISIG_ADDRESS
+      );
+      setTokenBalance((prevState) => {
+        return { ...prevState, multisig: multisig.div(1e6).toNumber() };
+      });
+    } catch (error) {
+      setError("You are not the owner");
+    }
   }
 
   async function claimRewards() {
-    const claim = await PROXY?.claim();
-    await claim.wait();
-    setClaimableRewards(0);
+    try {
+      const claim = await PROXY?.claim();
+      await claim.wait();
+      setClaimableRewards(0);
+    } catch (error) {
+      setError("Claim is unavailable");
+    }
   }
 
   return (
     <div className={styles.container}>
+      <img src={`/bg.png`} className={styles.stakingBg}/>
       <h1 className={styles.h1}>InVar USDC Vault</h1>
-
       {!address ? (
         <button className={styles.mainButton} onClick={connectWithMetamask}>
           Connect Wallet
@@ -153,6 +166,15 @@ const Stake: NextPage = () => {
           </button>
 
           <hr className={`${styles.divider} ${styles.spacerTop}`} />
+
+          {!error ? (
+            <></>
+          ) : (
+            <>
+              <h2 className={styles.lightPurple}>{error}</h2>
+              <hr className={`${styles.divider} ${styles.spacerTop}`} />
+            </>
+          )}
 
           <h2>Your Tokens</h2>
           <div className={styles.tokenGrid}>

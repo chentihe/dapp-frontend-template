@@ -390,6 +390,10 @@
     width: 90%;
     margin-top: 12px;
   }
+  .tokenOverview {
+    width: 90%;
+    margin-top: 12px;
+  }
 }
 
 /* Screen less than 630, then hide .center */
@@ -476,4 +480,15 @@
 
 .noGapBottom {
   margin-bottom: 0px;
+}
+
+.stakingBg {
+  pointer-events: none;
+  position: absolute;
+  height: 100%;
+  background-repeat: no-repeat;
+  background-size: contain;
+  background-position: center;
+  opacity: 0.3;
+  z-index: -1;
 }
